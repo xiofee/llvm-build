@@ -1,0 +1,44 @@
+name: Detect Env
+on: workflow_dispatch
+jobs:
+  detect-env:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [
+            ubuntu-18.04,
+            ubuntu-20.04,
+            ubuntu-22.04,
+            windows-2016,
+            windows-2019,
+            windows-2022,
+            macos-10.15,
+            macos-11,
+            macos-12
+          ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Get Environment variables
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: set
+      - name: Get Environment variables
+        if: runner.os != 'Windows'
+        shell: bash
+        run: export
+      - name: Get Disk space info
+        shell: bash
+        run: df -h
+      - name: Get Disk usage info
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          du -h -d 2 /c
+          du -h -d 2 /d
+          exit 0
+      - name: Get Disk usage info
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          du -h -d 2 /
+          exit 0

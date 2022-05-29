@@ -1,0 +1,206 @@
+name: LLVM Build
+on:
+  workflow_dispatch:
+    inputs:
+      INPUT_LLVM_VER:
+        description: 'LLVM package version'
+        required: true
+        type: string
+        default: ""
+      INPUT_LLVM_REF:
+        description: 'LLVM repo tag or ref'
+        required: true
+        type: string
+        default: ""
+      INPUT_LLVM_ENABLE_PROJECTS:
+        description: 'LLVM_ENABLE_PROJECTS'
+        required: false
+        type: string
+        default: "clang;lld;clang-tools-extra"
+      INPUT_LLVM_ENABLE_RUNTIMES:
+        description: 'LLVM_ENABLE_RUNTIMES'
+        required: false
+        type: string
+        default: ""
+      INPUT_LLVM_TARGETS_TO_BUILD:
+        description: 'LLVM_TARGETS_TO_BUILD'
+        required: false
+        type: string
+        default: "all"
+      INPUT_CMAKE_ADDITIONAL_CONFIG_ARGS:
+        description: 'Additional CMake configure params'
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  llvm-build:
+    name: llvm-${{github.event.inputs.INPUT_LLVM_VER}}-${{matrix.toolchain}}-${{matrix.arch}}-${{matrix.crt}}-${{matrix.config}}
+    runs-on: windows-2022
+
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain:
+          - msvc17
+        arch:
+          - x86
+          - x64
+        crt:
+          - md
+          - mt
+        config:
+          - release
+          - minsizerel
+
+    env:
+      LLVM_VER: ${{github.event.inputs.INPUT_LLVM_VER}}
+      LLVM_REF: ${{github.event.inputs.INPUT_LLVM_REF}}
+      LLVM_ENABLE_PROJECTS: ${{github.event.inputs.INPUT_LLVM_ENABLE_PROJECTS}}
+      LLVM_ENABLE_RUNTIMES: ${{github.event.inputs.INPUT_LLVM_ENABLE_RUNTIMES}}
+      LLVM_TARGETS_TO_BUILD: ${{github.event.inputs.INPUT_LLVM_TARGETS_TO_BUILD}}
+      CMAKE_ADDITIONAL_CONFIG_ARGS: ${{github.event.inputs.INPUT_CMAKE_ADDITIONAL_CONFIG_ARGS}}
+
+    steps:
+    - name: Setup Environments
+      shell: cmd
+      run: |
+        :: Setup Environments
+        if "x${{matrix.arch}}" neq "xx86" (
+          if "x${{matrix.arch}}" neq "xx64" (
+            echo.unknow arch: "${{matrix.arch}}".
+            exit -2
+          )
+        )
+
+        if "x${{matrix.crt}}" equ "xmd" set BUILD_CRT=MD
+        if "x${{matrix.crt}}" equ "xmt" set BUILD_CRT=MT
+        if "x${{matrix.config}}" equ "xdebug" set BUILD_CONFIG=Debug
+        if "x${{matrix.config}}" equ "xrelease" set BUILD_CONFIG=Release
+        if "x${{matrix.config}}" equ "xrelwithdebinfo" set BUILD_CONFIG=RelWithDebInfo
+        if "x${{matrix.config}}" equ "xminsizerel" set BUILD_CONFIG=MinSizeRel
+
+        if "%BUILD_CRT%" equ "" (
+          echo.unknow crt: "${{matrix.crt}}".
+          exit -3
+        )
+
+        if "%BUILD_CONFIG%" equ "" (
+          echo.unknow config: "${{matrix.config}}".
+          exit -4
+        )
+
+        set RELEASE_NAME=llvm-${{env.LLVM_VER}}-${{matrix.toolchain}}-${{matrix.arch}}-${{matrix.crt}}-${{matrix.config}}
+        set RELEASE_FILE=C:\%RELEASE_NAME%.7z
+
+        set SOURCE_DIR=${{ github.workspace }}\src
+        set BUILD_DIR=C:\build
+        set INSTALL_DIR=C:\llvm
+
+        set CMAKE_CONFIG_ARGS=-DCMAKE_BUILD_TYPE:STRING=%BUILD_CONFIG%
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DCMAKE_INSTALL_PREFIX:PATH=%INSTALL_DIR%
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DCMAKE_C_FLAGS:STRING="/utf-8"
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DCMAKE_CXX_FLAGS:STRING="/utf-8"
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_USE_CRT_DEBUG:STRING=%BUILD_CRT%d
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_USE_CRT_RELEASE:STRING=%BUILD_CRT%
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_USE_CRT_RELWITHDEBINFO:STRING=%BUILD_CRT%
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_USE_CRT_MINSIZEREL:STRING=%BUILD_CRT%
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_ENABLE_PROJECTS:STRING="${{env.LLVM_ENABLE_PROJECTS}}"
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_ENABLE_RUNTIMES:STRING="${{env.LLVM_ENABLE_RUNTIMES}}"
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_TARGETS_TO_BUILD:STRING="${{env.LLVM_TARGETS_TO_BUILD}}"
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_OPTIMIZED_TABLEGEN:BOOL=ON
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_ENABLE_ASSERTIONS:BOOL=ON
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_ENABLE_BINDINGS:BOOL=OFF
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_ENABLE_LIBXML2:BOOL=OFF
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_ENABLE_ZLIB:BOOL=OFF
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_ENABLE_Z3_SOLVER:BOOL=OFF
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_BUILD_BENCHMARKS:BOOL=OFF
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_BUILD_DOCS:BOOL=OFF
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_BUILD_EXAMPLES:BOOL=OFF
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_BUILD_TESTS:BOOL=OFF
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_INCLUDE_BENCHMARKS:BOOL=OFF
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_INCLUDE_EXAMPLES:BOOL=OFF
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_INCLUDE_TESTS:BOOL=OFF
+        set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DLLVM_INCLUDE_GO_TESTS:BOOL=OFF
+
+        set CMAKE_ADDITIONAL_CONFIG_ARGS=${{env.CMAKE_ADDITIONAL_CONFIG_ARGS}}
+        if "%CMAKE_ADDITIONAL_CONFIG_ARGS%" neq "" (
+          set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% %CMAKE_ADDITIONAL_CONFIG_ARGS%
+        )
+
+        if "%BUILD_CRT%" neq "MT" (
+          set CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS% -DCMAKE_INSTALL_UCRT_LIBRARIES=ON
+        )
+
+        echo.==================================================
+        echo.LLVM_VER              : %LLVM_VER%
+        echo.LLVM_REF              : %LLVM_REF%
+        echo.LLVM_ENABLE_PROJECTS  : %LLVM_ENABLE_PROJECTS%
+        echo.LLVM_ENABLE_RUNTIMES  : %LLVM_ENABLE_RUNTIMES%
+        echo.LLVM_TARGETS_TO_BUILD : %LLVM_TARGETS_TO_BUILD%
+        echo.RELEASE_NAME          : %RELEASE_NAME%
+        echo RELEASE_FILE          : %RELEASE_FILE%
+        echo.CMAKE_CONFIG_ARGS     : %CMAKE_CONFIG_ARGS%
+        echo.==================================================
+
+        set RELEASE_BODY_FILE=${{ github.workspace }}\release.md
+        echo ::set-output name=RELEASE_BODY_FILE::%RELEASE_BODY_FILE%
+        echo.# LLVM %LLVM_VER%(%LLVM_VER%)>%RELEASE_BODY_FILE%
+        echo.LLVM_ENABLE_PROJECTS   : "%LLVM_ENABLE_PROJECTS%">>%RELEASE_BODY_FILE%
+        echo.LLVM_ENABLE_RUNTIMES.  : "%LLVM_ENABLE_RUNTIMES%">>%RELEASE_BODY_FILE%
+        echo.LLVM_TARGETS_TO_BUILD  : "%LLVM_TARGETS_TO_BUILD%">>%RELEASE_BODY_FILE%
+
+        echo.RELEASE_NAME=%RELEASE_NAME%>>%GITHUB_ENV%
+        echo.RELEASE_FILE=%RELEASE_FILE%>>%GITHUB_ENV%
+        echo.SOURCE_DIR=%SOURCE_DIR%>>%GITHUB_ENV%
+        echo.BUILD_DIR=%BUILD_DIR%>>%GITHUB_ENV%
+        echo.INSTALL_DIR=%INSTALL_DIR%>>%GITHUB_ENV%
+        echo.BUILD_CRT=%BUILD_CRT%>>%GITHUB_ENV%
+        echo.BUILD_CONFIG=%BUILD_CONFIG%>>%GITHUB_ENV%
+        echo.CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS%>>%GITHUB_ENV%
+
+    - name: Checkout Source
+      if: ${{ success() }}
+      uses: actions/checkout@v3
+      with:
+        repository: 'llvm/llvm-project'
+        ref: '${{env.LLVM_REF}}'
+        path: 'src'
+
+    - name: Build
+      if: ${{ success() }}
+      id: build
+      shell: cmd
+      run: |
+        :: Build LLVM
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" ${{matrix.arch}}
+
+        echo ::group::Configure
+        cmake -G Ninja -S "%SOURCE_DIR%/llvm" -B "%BUILD_DIR%" %CMAKE_CONFIG_ARGS% || exit -6
+        echo ::endgroup::
+
+        echo ::group::Build
+        cmake --build "%BUILD_DIR%" --config %BUILD_CONFIG% || exit -7
+        echo ::endgroup::
+
+        echo ::group::Install
+        cmake --build "%BUILD_DIR%" --target install || exit -8
+        echo ::endgroup::
+
+        echo ::group::Package
+        7z a -t7z -mx9 -md128m "%RELEASE_FILE%" "%INSTALL_DIR%\*"
+        if not exist %RELEASE_FILE% exit -7
+        echo ::endgroup::
+
+        echo ::set-output name=RELEASE_FILE::%RELEASE_FILE%
+        echo ::set-output name=status::success
+
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      if: ${{ steps.setup_envs.outputs.status == 'success' }} && ${{ !cancelled() }}
+      env:
+        GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      with:
+        tag_name: llvm-${{env.LLVM_VER}}
+        body_path: ${{steps.setup_envs.outputs.RELEASE_BODY_FILE}}
+        files: ${{steps.build.outputs.RELEASE_FILE}}
