@@ -1,4 +1,5 @@
 name: LLVM Build
+run-name: Build LLVM for ${{inputs.INPUT_LLVM_VER}}
 on:
   workflow_dispatch:
     inputs:
@@ -35,11 +36,11 @@ on:
 
 jobs:
   llvm-build:
-    name: llvm-${{github.event.inputs.INPUT_LLVM_VER}}-${{matrix.toolchain}}-${{matrix.arch}}-${{matrix.crt}}-${{matrix.config}}
+    name: llvm-${{github.event.inputs.INPUT_LLVM_VER}}-${{matrix.toolchain}}-${{matrix.arch}}-${{matrix.crt}}-${{matrix.cfg}}
     runs-on: windows-2022
 
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         toolchain:
           - msvc17
@@ -49,7 +50,7 @@ jobs:
         crt:
           - md
           - mt
-        config:
+        cfg:
           - release
           - minsizerel
 
@@ -63,6 +64,7 @@ jobs:
 
     steps:
     - name: Setup Environments
+      id: setup_env
       shell: cmd
       run: |
         :: Setup Environments
@@ -75,10 +77,10 @@ jobs:
 
         if "x${{matrix.crt}}" equ "xmd" set BUILD_CRT=MD
         if "x${{matrix.crt}}" equ "xmt" set BUILD_CRT=MT
-        if "x${{matrix.config}}" equ "xdebug" set BUILD_CONFIG=Debug
-        if "x${{matrix.config}}" equ "xrelease" set BUILD_CONFIG=Release
-        if "x${{matrix.config}}" equ "xrelwithdebinfo" set BUILD_CONFIG=RelWithDebInfo
-        if "x${{matrix.config}}" equ "xminsizerel" set BUILD_CONFIG=MinSizeRel
+        if "x${{matrix.cfg}}" equ "xdebug" set BUILD_CONFIG=Debug
+        if "x${{matrix.cfg}}" equ "xrelease" set BUILD_CONFIG=Release
+        if "x${{matrix.cfg}}" equ "xrelwithdebinfo" set BUILD_CONFIG=RelWithDebInfo
+        if "x${{matrix.cfg}}" equ "xminsizerel" set BUILD_CONFIG=MinSizeRel
 
         if "%BUILD_CRT%" equ "" (
           echo.unknow crt: "${{matrix.crt}}".
@@ -86,12 +88,13 @@ jobs:
         )
 
         if "%BUILD_CONFIG%" equ "" (
-          echo.unknow config: "${{matrix.config}}".
+          echo.unknow config: "${{matrix.cfg}}".
           exit -4
         )
 
-        set RELEASE_NAME=llvm-${{env.LLVM_VER}}-${{matrix.toolchain}}-${{matrix.arch}}-${{matrix.crt}}-${{matrix.config}}
+        set RELEASE_NAME=llvm-${{env.LLVM_VER}}-${{matrix.toolchain}}-${{matrix.arch}}-${{matrix.crt}}-${{matrix.cfg}}
         set RELEASE_FILE=C:\%RELEASE_NAME%.7z
+        set RELEASE_BODY_FILE=${{ github.workspace }}\release.md
 
         set SOURCE_DIR=${{ github.workspace }}\src
         set BUILD_DIR=C:\build
@@ -143,15 +146,9 @@ jobs:
         echo.CMAKE_CONFIG_ARGS     : %CMAKE_CONFIG_ARGS%
         echo.==================================================
 
-        set RELEASE_BODY_FILE=${{ github.workspace }}\release.md
-        echo ::set-output name=RELEASE_BODY_FILE::%RELEASE_BODY_FILE%
-        echo.# LLVM %LLVM_VER%(%LLVM_VER%)>%RELEASE_BODY_FILE%
-        echo.LLVM_ENABLE_PROJECTS   : "%LLVM_ENABLE_PROJECTS%">>%RELEASE_BODY_FILE%
-        echo.LLVM_ENABLE_RUNTIMES.  : "%LLVM_ENABLE_RUNTIMES%">>%RELEASE_BODY_FILE%
-        echo.LLVM_TARGETS_TO_BUILD  : "%LLVM_TARGETS_TO_BUILD%">>%RELEASE_BODY_FILE%
-
         echo.RELEASE_NAME=%RELEASE_NAME%>>%GITHUB_ENV%
         echo.RELEASE_FILE=%RELEASE_FILE%>>%GITHUB_ENV%
+        echo.RELEASE_BODY_FILE=%RELEASE_BODY_FILE%>>%GITHUB_ENV%
         echo.SOURCE_DIR=%SOURCE_DIR%>>%GITHUB_ENV%
         echo.BUILD_DIR=%BUILD_DIR%>>%GITHUB_ENV%
         echo.INSTALL_DIR=%INSTALL_DIR%>>%GITHUB_ENV%
@@ -159,17 +156,31 @@ jobs:
         echo.BUILD_CONFIG=%BUILD_CONFIG%>>%GITHUB_ENV%
         echo.CMAKE_CONFIG_ARGS=%CMAKE_CONFIG_ARGS%>>%GITHUB_ENV%
 
+        exit 0
+
     - name: Checkout Source
-      if: ${{ success() }}
+      if: ${{ success() }} && ${{ !cancelled() }}
+      id: checkout_src
       uses: actions/checkout@v3
       with:
         repository: 'llvm/llvm-project'
         ref: '${{env.LLVM_REF}}'
         path: 'src'
 
+    - name: Get LLVM SHA
+      if: ${{ success() }} && ${{ !cancelled() }}
+      id: get_llvm_hash
+      shell: pwsh
+      run: |
+        cd ${{env.SOURCE_DIR}}
+        $commitHash = (git rev-parse HEAD).Substring(0,40)
+        echo "LLVM_REF_HASH=$commitHash"
+        echo "LLVM_REF_HASH=$commitHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        exit 0
+
     - name: Build
-      if: ${{ success() }}
-      id: build
+      if: ${{ success() }} && ${{ !cancelled() }}
+      id: build_llvm
       shell: cmd
       run: |
         :: Build LLVM
@@ -192,15 +203,28 @@ jobs:
         if not exist %RELEASE_FILE% exit -7
         echo ::endgroup::
 
-        echo ::set-output name=RELEASE_FILE::%RELEASE_FILE%
-        echo ::set-output name=status::success
+        echo ::group::Generate Release Info
+
+        echo.^| Build Option ^| Value ^|>${{env.RELEASE_BODY_FILE}}
+        echo.^|-^|-^|>>${{env.RELEASE_BODY_FILE}}
+        echo.^| LLVM_VER ^| %LLVM_VER% ^|>>${{env.RELEASE_BODY_FILE}}
+        echo.^| LLVM_REF ^| [%LLVM_REF%](https://github.com/llvm/llvm-project/tree/%LLVM_REF_HASH%) ^|>>${{env.RELEASE_BODY_FILE}}
+        echo.^| LLVM_ENABLE_PROJECTS ^| "%LLVM_ENABLE_PROJECTS%" ^|>>${{env.RELEASE_BODY_FILE}}
+        echo.^| LLVM_ENABLE_RUNTIMES ^| "%LLVM_ENABLE_RUNTIMES%" ^|>>${{env.RELEASE_BODY_FILE}}
+        echo.^| LLVM_TARGETS_TO_BUILD ^| "%LLVM_TARGETS_TO_BUILD%" ^|>>${{env.RELEASE_BODY_FILE}}
+
+        type ${{env.RELEASE_BODY_FILE}}
+        echo ::endgroup::
+
+        exit 0
 
     - name: Release
+      if: ${{ success() }} && ${{ !cancelled() }}
+      id: update_release
       uses: softprops/action-gh-release@v1
-      if: ${{ steps.setup_envs.outputs.status == 'success' }} && ${{ !cancelled() }}
       env:
         GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
       with:
         tag_name: llvm-${{env.LLVM_VER}}
-        body_path: ${{steps.setup_envs.outputs.RELEASE_BODY_FILE}}
-        files: ${{steps.build.outputs.RELEASE_FILE}}
+        body_path: ${{env.RELEASE_BODY_FILE}}
+        files: ${{env.RELEASE_FILE}}
